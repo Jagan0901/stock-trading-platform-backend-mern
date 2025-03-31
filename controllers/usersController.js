@@ -12,18 +12,18 @@ const registerUser = asyncHandler(async (req, res) => {
   const { name, email, password} = req.body;
 
   if (!name || !email || !password) {
-    res.status(400);
-    throw new Error("Please Enter all the Feilds");
+    res.status(400).json("Please Enter all the Fields");
+    // throw new Error("Please Enter all the Feilds");
   }
 
   const userExists = await User.findOne({ email });
 
   if (userExists) {
-    res.status(400);
+    res.status(400).json("Invalid Email or Password");
     throw new Error("User already exists");
   }
   if(!/^(?=.*?[A-Z])(?=(.*[a-z]){1,})(?=(.*[\d]){1,})(?=(.*[\W]){1,})(?!.*\s).{8,}$/g.test(password)){
-        res.status(404).send({message : "Password pattern does not match"})
+        res.status(404).json("Password pattern does not match")
         return;
     }
 
@@ -42,8 +42,8 @@ const registerUser = asyncHandler(async (req, res) => {
       token: generateToken(user._id),
     });
   } else {
-    res.status(400);
-    throw new Error("User not found");
+    res.status(400).json("User not found");
+    // throw new Error("User not found");
   }
 });
 
@@ -62,8 +62,8 @@ const authUser = asyncHandler(async (req, res) => {
       token: generateToken(user._id),
     });
   } else {
-    res.status(401);
-    throw new Error("Invalid Email or Password");
+    res.status(401).json("Invalid Email or Password");
+    // throw new Error("Invalid Email or Password");
   }
 });
 
