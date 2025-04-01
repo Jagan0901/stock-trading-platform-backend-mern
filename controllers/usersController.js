@@ -23,7 +23,7 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new Error("User already exists");
   }
   if(!/^(?=.*?[A-Z])(?=(.*[a-z]){1,})(?=(.*[\d]){1,})(?=(.*[\W]){1,})(?!.*\s).{8,}$/g.test(password)){
-        res.status(404).json("Password pattern does not match")
+        res.status(404).json("Password must contain at least 8 characters, one uppercase, one lowercase, one number and one special character")
         return;
     }
 
@@ -67,4 +67,9 @@ const authUser = asyncHandler(async (req, res) => {
   }
 });
 
-module.exports = {registerUser, authUser };
+const getWalletBalance = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select("wallet");
+  res.status(200).json({ balance: user.wallet });
+});
+
+module.exports = { registerUser, authUser, getWalletBalance };
