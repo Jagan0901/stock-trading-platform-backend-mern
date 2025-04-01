@@ -10,19 +10,15 @@ const placeOrder = asyncHandler(async (req, res) => {
 
   // Validate input
   if (!stock || !type || !quantity || quantity <= 0) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid order details",
-    });
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid order details" });
   }
 
   // Get current stock price
   const stockData = await Stock.findOne({ symbol: stock });
   if (!stockData) {
-    return res.status(404).json({
-      success: false,
-      message: "Stock not found",
-    });
+    return res.status(404).json({ success: false, message: "Stock not found" });
   }
 
   const price = stockData.currentPrice;
@@ -61,12 +57,12 @@ const placeOrder = asyncHandler(async (req, res) => {
 
   // Update user's portfolio and wallet
   if (type === "buy") {
-    // Deduct from wallet using findByIdAndUpdate
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $inc: { wallet: -totalAmount } },
-      { new: true }
-    );
+    // Deduct from wallet
+    user.wallet -= totalAmount;
+    await user.save();
+    // user.wallet -= totalAmount;
+    // user.markModified('wallet');  
+    // await user.save({ validateModifiedOnly: true });
 
     // Add to portfolio
     let portfolioItem = await Portfolio.findOne({ user: userId, stock });
@@ -88,12 +84,12 @@ const placeOrder = asyncHandler(async (req, res) => {
     portfolioItem.averageBuyPrice = newAveragePrice;
     await portfolioItem.save();
   } else if (type === "sell") {
-    // Add to wallet using findByIdAndUpdate
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $inc: { wallet: totalAmount } },
-      { new: true }
-    );
+    // Add to wallet
+    user.wallet += totalAmount;
+    await user.save();
+    // user.wallet += totalAmount;
+    // user.markModified("wallet"); 
+    // await user.save({ validateModifiedOnly: true });
 
     // Deduct from portfolio
     const portfolioItem = await Portfolio.findOne({ user: userId, stock });
@@ -106,13 +102,10 @@ const placeOrder = asyncHandler(async (req, res) => {
     }
   }
 
-  // Get updated wallet balance
-  const updatedUser = await User.findById(userId).select("wallet");
-
   res.status(201).json({
     success: true,
     data: order,
-    walletBalance: updatedUser.wallet,
+    walletBalance: user.wallet,
   });
 });
 
@@ -120,10 +113,7 @@ const getOrders = asyncHandler(async (req, res) => {
   const orders = await Order.find({ user: req.user._id }).sort({
     createdAt: -1,
   });
-  res.status(200).json({
-    success: true,
-    data: orders,
-  });
+  res.status(200).json({ success: true, data: orders });
 });
 
 module.exports = { placeOrder, getOrders };
