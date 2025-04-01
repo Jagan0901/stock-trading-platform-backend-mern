@@ -3,117 +3,138 @@ const Portfolio = require("../models/portfolioModel");
 const Stock = require("../models/stockModel");
 const User = require("../models/userModel");
 const asyncHandler = require("express-async-handler");
+const mongoose = require("mongoose");
 
 const placeOrder = asyncHandler(async (req, res) => {
-  const { stock, type, quantity } = req.body;
-  const userId = req.user._id;
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  // Validate input
-  if (!stock || !type || !quantity || quantity <= 0) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid order details",
-    });
-  }
+  try {
+    const { stock, type, quantity } = req.body;
+    const userId = req.user._id;
 
-  // Get current stock price
-  const stockData = await Stock.findOne({ symbol: stock });
-  if (!stockData) {
-    return res.status(404).json({
-      success: false,
-      message: "Stock not found",
-    });
-  }
-
-  const price = stockData.currentPrice;
-  const totalAmount = price * quantity;
-
-  // Check user's ability to execute order
-  const user = await User.findById(userId);
-
-  if (type === "buy") {
-    if (user.wallet < totalAmount) {
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient wallet balance",
-      });
+    // Validate input
+    if (!stock || !type || !quantity || quantity <= 0) {
+      throw new Error("Invalid order details");
     }
-  } else if (type === "sell") {
-    const portfolioItem = await Portfolio.findOne({ user: userId, stock });
-    if (!portfolioItem || portfolioItem.quantity < quantity) {
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient shares to sell",
-      });
+
+    // Get current stock price
+    const stockData = await Stock.findOne({ symbol: stock }).session(session);
+    if (!stockData) {
+      throw new Error("Stock not found");
     }
-  }
 
-  // Create and execute order
-  const order = await Order.create({
-    user: userId,
-    stock,
-    type,
-    quantity,
-    price,
-    status: "completed",
-    executedAt: new Date(),
-  });
+    const price = stockData.currentPrice;
+    const totalAmount = price * quantity;
 
-  // Update user's portfolio and wallet
-  if (type === "buy") {
-    // Deduct from wallet using findByIdAndUpdate
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $inc: { wallet: -totalAmount } },
-      { new: true }
-    );
+    // Check user's ability to execute order
+    const user = await User.findById(userId).session(session);
+    if (!user) {
+      throw new Error("User not found");
+    }
 
-    // Add to portfolio
-    let portfolioItem = await Portfolio.findOne({ user: userId, stock });
-    if (!portfolioItem) {
-      portfolioItem = new Portfolio({
+    if (type === "buy") {
+      if (user.wallet < totalAmount) {
+        throw new Error("Insufficient wallet balance");
+      }
+    } else if (type === "sell") {
+      const portfolioItem = await Portfolio.findOne({
         user: userId,
         stock,
-        quantity: 0,
-        averageBuyPrice: 0,
-      });
+      }).session(session);
+      if (!portfolioItem || portfolioItem.quantity < quantity) {
+        throw new Error("Insufficient shares to sell");
+      }
     }
 
-    const newTotalQuantity = portfolioItem.quantity + quantity;
-    const newAveragePrice =
-      (portfolioItem.averageBuyPrice * portfolioItem.quantity + totalAmount) /
-      newTotalQuantity;
-
-    portfolioItem.quantity = newTotalQuantity;
-    portfolioItem.averageBuyPrice = newAveragePrice;
-    await portfolioItem.save();
-  } else if (type === "sell") {
-    // Add to wallet using findByIdAndUpdate
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $inc: { wallet: totalAmount } },
-      { new: true }
+    // Create order
+    const order = await Order.create(
+      [
+        {
+          user: userId,
+          stock,
+          type,
+          quantity,
+          price,
+          status: "completed",
+          executedAt: new Date(),
+        },
+      ],
+      { session }
     );
 
-    // Deduct from portfolio
-    const portfolioItem = await Portfolio.findOne({ user: userId, stock });
-    portfolioItem.quantity -= quantity;
-
-    if (portfolioItem.quantity === 0) {
-      await Portfolio.findByIdAndDelete(portfolioItem._id);
+    // Update wallet without triggering password hash
+    if (type === "buy") {
+      await User.findByIdAndUpdate(
+        userId,
+        { $inc: { wallet: -totalAmount } },
+        { session }
+      );
     } else {
-      await portfolioItem.save();
+      await User.findByIdAndUpdate(
+        userId,
+        { $inc: { wallet: totalAmount } },
+        { session }
+      );
     }
+
+    // Update portfolio
+    if (type === "buy") {
+      let portfolioItem = await Portfolio.findOne({
+        user: userId,
+        stock,
+      }).session(session);
+
+      if (!portfolioItem) {
+        portfolioItem = new Portfolio({
+          user: userId,
+          stock,
+          quantity: 0,
+          averageBuyPrice: 0,
+        });
+      }
+
+      const newTotalQuantity = portfolioItem.quantity + quantity;
+      const newAveragePrice =
+        (portfolioItem.averageBuyPrice * portfolioItem.quantity + totalAmount) /
+        newTotalQuantity;
+
+      portfolioItem.quantity = newTotalQuantity;
+      portfolioItem.averageBuyPrice = newAveragePrice;
+      await portfolioItem.save({ session });
+    } else {
+      const portfolioItem = await Portfolio.findOne({
+        user: userId,
+        stock,
+      }).session(session);
+      portfolioItem.quantity -= quantity;
+
+      if (portfolioItem.quantity === 0) {
+        await Portfolio.findByIdAndDelete(portfolioItem._id, { session });
+      } else {
+        await portfolioItem.save({ session });
+      }
+    }
+
+    await session.commitTransaction();
+
+    // Get fresh wallet balance
+    const updatedUser = await User.findById(userId).select("wallet");
+
+    res.status(201).json({
+      success: true,
+      data: order[0],
+      walletBalance: updatedUser.wallet,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  } finally {
+    session.endSession();
   }
-
-  // Get updated wallet balance
-  const updatedUser = await User.findById(userId).select("wallet");
-
-  res.status(201).json({
-    success: true,
-    data: order,
-    walletBalance: updatedUser.wallet,
-  });
 });
 
 const getOrders = asyncHandler(async (req, res) => {
