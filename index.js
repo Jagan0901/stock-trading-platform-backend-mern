@@ -3,6 +3,8 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const connectDB = require("./config/db");
 const userRoutes = require("./routes/usersRouter");
+const stockRouter = require("./routes/stocksRouter");
+const { startStockUpdater } = require("./services/stockUpdator");
 // const taskRoutes = require("./routes/taskRoutes")
 
 const app = express();
@@ -13,13 +15,16 @@ dotenv.config();
 connectDB();
 app.use(express.json()); // to accept json data
 
+// Start stock price updates
+startStockUpdater();
+
 app.get("/", async(req,res)=>{
     res.send("API is running successfully");
 })
 
 
 app.use("/api/user", userRoutes);
-// app.use("/api/task", taskRoutes);
+app.use("/api/stocks", stockRouter);
 
 app.listen(
   process.env.PORT,
